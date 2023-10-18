@@ -47,7 +47,7 @@ func open(ctx context.Context, cfg Config, rt http.RoundTripper) (*Backend, erro
 		return nil, errors.Fatalf("unable to authenticate OCI object store: Tenancy ID ($OCI_COMPARTMENT_OCID) is empty")
 	}
 	// if instance principal is not set then set the user principal values
-	if !cfg.UseInstancePrincipals {
+	if cfg.OCIAuthType == UserPrincipal {
 		if cfg.Region == "" {
 			return nil, errors.Fatalf("unable to authenticate OCI object store: Tenancy ID ($OCI_REGION) is empty")
 		}

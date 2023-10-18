@@ -19,16 +19,29 @@ func init() {
 	options.Register("oci", Config{})
 }
 
+type OraclePrincipalType string
+
 const (
-	OCI_AUTH_INSTANCE_PRINCIPAL_ENV_VAR = "OCI_CLI_AUTH"
-	OCI_REGION_ENV_VAR                  = "OCI_REGION"
-	OCI_USER_ENV_VAR                    = "OCI_USER"
-	OCI_FINGERPRINT_ENV_VAR             = "OCI_FINGERPRINT"
-	OCI_KEY_FILE_ENV_VAR                = "OCI_KEY_FILE"
-	OCI_TENANCY_ENV_VAR                 = "OCI_TENANCY"
-	OCI_PASSPHRASE_ENV_VAR              = "OCI_PASSPHRASE"
-	OCI_COMPARTMENT_ENV_VAR             = "OCI_COMPARTMENT_OCID"
-	InstnacePrincipalKey                = "instance_principal"
+	// UserPrincipal represents a user principal.
+	UserPrincipal OraclePrincipalType = "UserPrincipal"
+	// InstancePrincipal represents a instance principal.
+	InstancePrincipal OraclePrincipalType = "InstancePrincipal"
+	// WorkloadPrincipal represents a workload principal.
+	WorkloadPrincipal OraclePrincipalType = "workload"
+)
+
+const (
+	OCI_AUTH_TYPE_KEY       = "OCI_AUTH_TYPE"
+	OCI_REGION_ENV_VAR      = "OCI_REGION"
+	OCI_USER_ENV_VAR        = "OCI_USER"
+	OCI_FINGERPRINT_ENV_VAR = "OCI_FINGERPRINT"
+	OCI_KEY_FILE_ENV_VAR    = "OCI_KEY_FILE"
+	OCI_TENANCY_ENV_VAR     = "OCI_TENANCY"
+	OCI_PASSPHRASE_ENV_VAR  = "OCI_PASSPHRASE"
+	OCI_COMPARTMENT_ENV_VAR = "OCI_COMPARTMENT_OCID"
+	UserPrincipalKey        = "user_principal"
+	InstancePrincipalKey    = "instance_principal"
+	WorkloadKey             = "workload"
 )
 
 // Config holds the configuration required for communicating with the OCI
@@ -40,6 +53,7 @@ type Config struct {
 	PrivateKey            options.SecretString
 	Fingerprint           string
 	Passphrase            string
+	OCIAuthType           OraclePrincipalType
 	UseInstancePrincipals bool
 	Bucket                string
 	Prefix                string
@@ -86,17 +100,21 @@ var _ restic.ApplyEnvironmenter = &Config{}
 // ApplyEnvironment saves values from the environment to the config.
 func (cfg *Config) ApplyEnvironment(prefix string) {
 
-	var instancePrincipal bool
-	if getEnvValuesWithDefault(OCI_AUTH_INSTANCE_PRINCIPAL_ENV_VAR, "user_principal") == InstnacePrincipalKey {
-		instancePrincipal = true
+	resourcePrincipal := getEnvValuesWithDefault(OCI_AUTH_TYPE_KEY, UserPrincipalKey)
+	switch resourcePrincipal {
+	case InstancePrincipalKey:
+		cfg.OCIAuthType = InstancePrincipal
+	case WorkloadKey:
+		cfg.OCIAuthType = WorkloadPrincipal
+	default:
+		cfg.OCIAuthType = UserPrincipal
 	}
-	cfg.UseInstancePrincipals = instancePrincipal
 
 	if cfg.CompartmentOCID == "" {
 		cfg.CompartmentOCID = os.Getenv(prefix + OCI_COMPARTMENT_ENV_VAR)
 	}
 
-	if !cfg.UseInstancePrincipals {
+	if cfg.OCIAuthType == UserPrincipal {
 		if cfg.Region == "" {
 			cfg.Region = os.Getenv(prefix + OCI_REGION_ENV_VAR)
 		}
@@ -137,9 +155,13 @@ func (cfg *Config) ApplyEnvironment(prefix string) {
 
 // NewConfigurationProvider build the OCI Auth provider
 func NewConfigurationProvider(cfg *Config) (common.ConfigurationProvider, error) {
-	if cfg.UseInstancePrincipals {
+	switch cfg.OCIAuthType {
+	case InstancePrincipal:
 		return auth.InstancePrincipalConfigurationProvider()
+	case WorkloadPrincipal:
+		return auth.OkeWorkloadIdentityConfigurationProvider()
 	}
+	// This is default case - UserPrincipal
 	return NewConfigurationProviderWithUserPrincipal(cfg)
 }
 
