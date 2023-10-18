@@ -2,13 +2,13 @@ package oci
 
 import (
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/options"
 	"github.com/restic/restic/internal/restic"
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
@@ -20,7 +20,7 @@ func init() {
 }
 
 const (
-	OCI_AUTH_INSTANCE_PRINCIPAL_ENV_VAR = "OCI_AUTH_INSTANCE_PRINCIPAL"
+	OCI_AUTH_INSTANCE_PRINCIPAL_ENV_VAR = "OCI_CLI_AUTH"
 	OCI_REGION_ENV_VAR                  = "OCI_REGION"
 	OCI_USER_ENV_VAR                    = "OCI_USER"
 	OCI_FINGERPRINT_ENV_VAR             = "OCI_FINGERPRINT"
@@ -28,6 +28,7 @@ const (
 	OCI_TENANCY_ENV_VAR                 = "OCI_TENANCY"
 	OCI_PASSPHRASE_ENV_VAR              = "OCI_PASSPHRASE"
 	OCI_COMPARTMENT_ENV_VAR             = "OCI_COMPARTMENT_OCID"
+	InstnacePrincipalKey                = "instance_principal"
 )
 
 // Config holds the configuration required for communicating with the OCI
@@ -85,14 +86,13 @@ var _ restic.ApplyEnvironmenter = &Config{}
 // ApplyEnvironment saves values from the environment to the config.
 func (cfg *Config) ApplyEnvironment(prefix string) {
 
-	useInstancePrincipal, err := strconv.ParseBool(getEnvValuesWithDefault(OCI_AUTH_INSTANCE_PRINCIPAL_ENV_VAR, "False"))
-	if err != nil {
-		fmt.Errorf("Invalid value set for provider OCI: OCI_AUTH_INSTANCE_PRINCIPAL")
-		os.Exit(1)
+	var instancePrincipal bool
+	if getEnvValuesWithDefault(OCI_AUTH_INSTANCE_PRINCIPAL_ENV_VAR, "user_principal") == InstnacePrincipalKey {
+		instancePrincipal = true
 	}
-	cfg.UseInstancePrincipals = useInstancePrincipal
+	cfg.UseInstancePrincipals = instancePrincipal
 
-	if !useInstancePrincipal {
+	if !cfg.UseInstancePrincipals {
 		if cfg.Region == "" {
 			cfg.Region = os.Getenv(prefix + OCI_REGION_ENV_VAR)
 		}
@@ -130,6 +130,7 @@ func (cfg *Config) ApplyEnvironment(prefix string) {
 			cfg.Passphrase = os.Getenv(prefix + OCI_PASSPHRASE_ENV_VAR)
 		}
 	}
+	spew.Dump(cfg)
 
 }
 
