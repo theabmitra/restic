@@ -43,6 +43,12 @@ func open(ctx context.Context, cfg Config, rt http.RoundTripper) (*Backend, erro
 
 	debug.Log("open, config %#v", cfg)
 
+	if cfg.Region == "" {
+		return nil, errors.Fatalf("unable to authenticate OCI object store: Tenancy ID ($OCI_REGION) is empty")
+	}
+	if cfg.CompartmentOCID == "" {
+		return nil, errors.Fatalf("unable to authenticate OCI object store: Tenancy ID ($OCI_COMPARTMENT_OCID) is empty")
+	}
 	// if instance principal is not set then set the user principal values
 	if !cfg.UseInstancePrincipals {
 		if cfg.TenancyID == "" {
@@ -57,9 +63,7 @@ func open(ctx context.Context, cfg Config, rt http.RoundTripper) (*Backend, erro
 		if cfg.PrivateKeyFile == "" {
 			return nil, errors.Fatalf("unable to authenticate OCI object store: Private key file path ($OCI_KEY_FILE) is empty")
 		}
-		if cfg.Region == "" {
-			return nil, errors.Fatalf("unable to authenticate OCI object store: Tenancy ID ($OCI_REGION) is empty")
-		}
+
 	}
 
 	ociAuthConfigProvider, err := NewConfigurationProvider(&cfg)
