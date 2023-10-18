@@ -2,7 +2,6 @@ package oci
 
 import (
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/options"
 	"github.com/restic/restic/internal/restic"
@@ -119,6 +118,14 @@ func (cfg *Config) ApplyEnvironment(prefix string) {
 		if cfg.Region == "" {
 			cfg.Region = os.Getenv(prefix + OCI_REGION_ENV_VAR)
 		}
+		if err := os.Setenv(auth.ResourcePrincipalVersionEnvVar, auth.ResourcePrincipalVersion2_2); err != nil {
+			fmt.Printf("unable to set OCI SDK environment variable: %s\n", auth.ResourcePrincipalVersionEnvVar)
+			os.Exit(1)
+		}
+		if err := os.Setenv(auth.ResourcePrincipalRegionEnvVar, cfg.Region); err != nil {
+			fmt.Printf("unable to set OCI SDK environment variable: %s\n", auth.ResourcePrincipalRegionEnvVar)
+			os.Exit(1)
+		}
 
 	case UserPrincipal:
 		if cfg.Region == "" {
@@ -160,7 +167,6 @@ func (cfg *Config) ApplyEnvironment(prefix string) {
 		}
 
 	}
-	spew.Dump(cfg)
 
 }
 
