@@ -258,9 +258,7 @@ func (be *Backend) openReader(ctx context.Context, h restic.Handle, length int, 
 	} else if offset > 0 {
 		bytesRange, err = getRange(offset, 0)
 	}
-	//fmt.Println("Bytes range = ", bytesRange)
 	if err != nil {
-		fmt.Println("Error in range: ", err)
 		return nil, err
 	}
 
@@ -291,7 +289,7 @@ func (be *Backend) openReader(ctx context.Context, h restic.Handle, length int, 
 	// In this example, we're storing the download content in memory, please be aware of any issue with oom
 	content, err := ioutil.ReadAll(resp.Content)
 	if err != nil {
-		fmt.Println("Error = ", err)
+		return nil, err
 	}
 
 	return io.NopCloser(bytes.NewReader(content)), nil
