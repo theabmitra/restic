@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/restic/restic/internal/backend/oci"
 	"io"
 	"os"
 	"path/filepath"
@@ -109,6 +110,7 @@ func init() {
 	backends.Register(s3.NewFactory())
 	backends.Register(sftp.NewFactory())
 	backends.Register(swift.NewFactory())
+	backends.Register(oci.NewFactory())
 	globalOptions.backends = backends
 
 	var cancel context.CancelFunc
@@ -652,6 +654,5 @@ func create(ctx context.Context, s string, gopts GlobalOptions, opts options.Opt
 	if err != nil {
 		return nil, err
 	}
-
 	return logger.New(sema.NewBackend(be)), nil
 }

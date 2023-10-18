@@ -317,6 +317,53 @@ this command.
     Please note that knowledge of your password is required to access
     the repository. Losing your password means that your data is irrecoverably lost.
 
+
+.. _Oracle Cloud Infrastructure Object Storage:
+
+Oracle Cloud Infrastructure Object Storage
+******************************************
+
+Restic can backup data to any Oracle Cloud Infrastructure Object Storage bucket. Oracle Cloud Infrastructure
+supports the following authentication mechanism to interact with object store
+- user principal
+- instance principal
+
+The following environment variables are required to be set for user principal authentication
+
+.. code-block:: console
+
+    $ export OCI_REGION=<OCI REGION WHERE BUCKET RESIDES>
+    $ export OCI_USER=<MY_OCI_USER_OCID>
+    $ export OCI_FINGERPRINT=<MY_OCI_FINGERPRINT>
+    $ export OCI_KEY_FILE=<MY_OCI_PRIVATE_KEY_FILE_PATH>
+    $ export OCI_TENANCY=<MY_OCI_TENANCY_OCID>
+    $ export OCI_COMPARTMENT_OCID=<MY_OCI_COMPARTMENT_OCID>
+
+The following environment variables are required to be set for instance principal authentication
+Using instance principal authentication, you can authorize an instance to make API calls on Oracle Cloud Infrastructure services.
+After you set up the required resources and policies, an application running on an instance can call Oracle Cloud Infrastructure
+public services, removing the need to configure user credentials or a configuration file.
+
+
+.. code-block:: console
+
+    $ export OCI_AUTH_INSTANCE_PRINCIPAL=True
+
+You can then easily initialize a repository that uses your OCI Object store as
+a backend. If the bucket does not exist it will be created in the
+default location:
+
+.. code-block:: console
+
+    $ restic -r oci:bucket_name init
+    enter password for new repository:
+    enter password again:
+    created restic repository 11ef9c84ff at oci:bucket_name
+
+    Please note that knowledge of your password is required to access
+    the repository. Losing your password means that your data is
+    irrecoverably lost.
+
 Wasabi
 ************
 
