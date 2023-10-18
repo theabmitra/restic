@@ -92,15 +92,15 @@ func (cfg *Config) ApplyEnvironment(prefix string) {
 	}
 	cfg.UseInstancePrincipals = instancePrincipal
 
-	if cfg.Region == "" {
-		cfg.Region = os.Getenv(prefix + OCI_REGION_ENV_VAR)
-	}
-
 	if cfg.CompartmentOCID == "" {
 		cfg.CompartmentOCID = os.Getenv(prefix + OCI_COMPARTMENT_ENV_VAR)
 	}
 
 	if !cfg.UseInstancePrincipals {
+		if cfg.Region == "" {
+			cfg.Region = os.Getenv(prefix + OCI_REGION_ENV_VAR)
+		}
+
 		if cfg.TenancyID == "" {
 			cfg.TenancyID = os.Getenv(prefix + OCI_TENANCY_ENV_VAR)
 		}
