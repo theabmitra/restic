@@ -109,11 +109,18 @@ func (cfg *Config) ApplyEnvironment(prefix string) {
 		cfg.OCIAuthType = UserPrincipal
 	}
 
-	if cfg.CompartmentOCID == "" {
-		cfg.CompartmentOCID = os.Getenv(prefix + OCI_COMPARTMENT_ENV_VAR)
-	}
+	switch cfg.OCIAuthType {
+	case InstancePrincipal:
+		if cfg.CompartmentOCID == "" {
+			cfg.CompartmentOCID = os.Getenv(prefix + OCI_COMPARTMENT_ENV_VAR)
+		}
 
-	if cfg.OCIAuthType == UserPrincipal {
+	case WorkloadPrincipal:
+		if cfg.Region == "" {
+			cfg.Region = os.Getenv(prefix + OCI_REGION_ENV_VAR)
+		}
+
+	case UserPrincipal:
 		if cfg.Region == "" {
 			cfg.Region = os.Getenv(prefix + OCI_REGION_ENV_VAR)
 		}
@@ -129,6 +136,10 @@ func (cfg *Config) ApplyEnvironment(prefix string) {
 		}
 		if cfg.PrivateKeyFile == "" {
 			cfg.PrivateKeyFile = os.Getenv(prefix + OCI_KEY_FILE_ENV_VAR)
+		}
+
+		if cfg.CompartmentOCID == "" {
+			cfg.CompartmentOCID = os.Getenv(prefix + OCI_COMPARTMENT_ENV_VAR)
 		}
 
 		_, err := os.Stat(filepath.Clean(cfg.PrivateKeyFile))
@@ -147,6 +158,7 @@ func (cfg *Config) ApplyEnvironment(prefix string) {
 		if cfg.Passphrase == "" {
 			cfg.Passphrase = os.Getenv(prefix + OCI_PASSPHRASE_ENV_VAR)
 		}
+
 	}
 	spew.Dump(cfg)
 
