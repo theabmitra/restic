@@ -46,20 +46,19 @@ const (
 
 // Config holds the configuration required for communicating with the OCI
 type Config struct {
-	Region                string
-	TenancyID             string
-	UserID                string
-	PrivateKeyFile        string
-	PrivateKey            options.SecretString
-	Fingerprint           string
-	Passphrase            string
-	OCIAuthType           OraclePrincipalType
-	UseInstancePrincipals bool
-	Bucket                string
-	Prefix                string
-	CompartmentOCID       string
-	Connections           uint   `option:"connections" help:"set a limit for the number of concurrent connections (default: 5)"`
-	Layout                string `option:"layout" help:"use this backend layout (default: auto-detect)"`
+	Region          string
+	TenancyID       string
+	UserID          string
+	PrivateKeyFile  string
+	PrivateKey      options.SecretString
+	Fingerprint     string
+	Passphrase      string
+	OCIAuthType     OraclePrincipalType
+	Bucket          string
+	Prefix          string
+	CompartmentOCID string
+	Connections     uint   `option:"connections" help:"set a limit for the number of concurrent connections (default: 5)"`
+	Layout          string `option:"layout" help:"use this backend layout (default: auto-detect)"`
 }
 
 // NewConfig returns a new Config with the default values filled in.
