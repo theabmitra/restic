@@ -269,7 +269,7 @@ func (be *Backend) openReader(ctx context.Context, h restic.Handle, length int, 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return io.NopCloser(resp.Content), nil
 }
 
