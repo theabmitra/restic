@@ -330,6 +330,8 @@ supports the following authentication mechanism to interact with object store
 - workload identity
 
 The following environment variables are required to be set for user principal authentication.
+
+
 .. code-block:: console
 
     $ export OCI_REGION=<OCI REGION WHERE BUCKET RESIDES>
@@ -355,7 +357,7 @@ public services, removing the need to configure user credentials or a configurat
 The following environment variables are required to be set when using OCI workload identity.
 Using OCI workload identity, you can authorize a pod on Kubernetes running `restic` the priviledges to access OCI object store
 resources to backup and restore data.
-For more info refer documentation `here <https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contenggrantingworkloadaccesstoresources.htm>`
+For more info refer documentation `here <https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contenggrantingworkloadaccesstoresources.htm>`__.
 
 .. code-block:: console
 
