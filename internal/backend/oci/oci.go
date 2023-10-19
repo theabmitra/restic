@@ -5,28 +5,31 @@ import (
 	"context"
 	"fmt"
 	"github.com/oracle/oci-go-sdk/v65/common"
+	"github.com/oracle/oci-go-sdk/v65/common/auth"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
+	"github.com/oracle/oci-go-sdk/v65/objectstorage/transfer"
 	"github.com/restic/restic/internal/backend"
 	"github.com/restic/restic/internal/backend/layout"
 	"github.com/restic/restic/internal/backend/location"
 	"github.com/restic/restic/internal/debug"
 	"github.com/restic/restic/internal/errors"
+	"github.com/restic/restic/internal/options"
 	"github.com/restic/restic/internal/restic"
 	"hash"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
-	"time"
 )
 
 // Backend stores data on an OCI object store.
 type Backend struct {
-	client objectstorage.ObjectStorageClient
-	cfg    Config
+	client      objectstorage.ObjectStorageClient
+	cfg         Config
+	connections uint
 	layout.Layout
 }
 
@@ -37,9 +40,7 @@ func NewFactory() location.Factory {
 	return location.NewHTTPBackendFactory("oci", ParseConfig, location.NoPassword, Create, Open)
 }
 
-const defaultLayout = "default"
-
-func open(ctx context.Context, cfg Config, rt http.RoundTripper) (*Backend, error) {
+func open(cfg Config, rt http.RoundTripper) (*Backend, error) {
 
 	debug.Log("open, config %#v", cfg)
 
@@ -52,6 +53,12 @@ func open(ctx context.Context, cfg Config, rt http.RoundTripper) (*Backend, erro
 	case WorkloadPrincipal:
 		if cfg.Region == "" {
 			return nil, errors.Fatalf("unable to authenticate OCI object store: Tenancy ID ($OCI_REGION) is empty")
+		}
+		if err := os.Setenv(auth.ResourcePrincipalVersionEnvVar, auth.ResourcePrincipalVersion2_2); err != nil {
+			return nil, errors.Fatalf("unable to set OCI SDK environment variable: %s\n", auth.ResourcePrincipalVersionEnvVar)
+		}
+		if err := os.Setenv(auth.ResourcePrincipalRegionEnvVar, cfg.Region); err != nil {
+			return nil, errors.Fatalf("unable to set OCI SDK environment variable: %s\n", auth.ResourcePrincipalRegionEnvVar)
 		}
 
 	case UserPrincipal:
@@ -73,6 +80,16 @@ func open(ctx context.Context, cfg Config, rt http.RoundTripper) (*Backend, erro
 		if cfg.CompartmentOCID == "" {
 			return nil, errors.Fatalf("unable to authenticate OCI object store: Tenancy ID ($OCI_COMPARTMENT_OCID) is empty")
 		}
+		_, err := os.Stat(filepath.Clean(cfg.PrivateKeyFile))
+		if err != nil {
+			return nil, errors.Fatalf("Unable to find private key file for provider OCI: OCI_KEY_FILE")
+		}
+
+		keyData, err := os.ReadFile(filepath.Clean(cfg.PrivateKeyFile))
+		if err != nil {
+			return nil, errors.Fatalf("Unable to find private key file for provider OCI: OCI_KEY_FILE")
+		}
+		cfg.PrivateKey = options.NewSecretString(string(keyData))
 	}
 
 	ociAuthConfigProvider, err := NewConfigurationProvider(&cfg)
@@ -86,37 +103,40 @@ func open(ctx context.Context, cfg Config, rt http.RoundTripper) (*Backend, erro
 		debug.Log("Error %v", err)
 		return nil, err
 	}
+	c.HTTPClient = &http.Client{Transport: rt}
 
 	be := &Backend{
-		client: c,
-		cfg:    cfg,
+		client:      c,
+		cfg:         cfg,
+		connections: cfg.Connections,
+		Layout: &layout.DefaultLayout{
+			Path: cfg.Prefix,
+			Join: path.Join,
+		},
 	}
-
-	l, err := layout.ParseLayout(ctx, be, cfg.Layout, defaultLayout, cfg.Prefix)
-	if err != nil {
-		return nil, err
-	}
-
-	be.Layout = l
-
 	return be, nil
 }
 
 // Open opens the OCI backend at bucket and region. The bucket is created if it
 // does not exist yet.
-func Open(ctx context.Context, cfg Config, rt http.RoundTripper) (restic.Backend, error) {
-	return open(ctx, cfg, rt)
+func Open(_ context.Context, cfg Config, rt http.RoundTripper) (restic.Backend, error) {
+	return open(cfg, rt)
 }
 
 // Create opens the OCI backend at bucket and region and creates the bucket if
 // it does not exist yet.
 func Create(ctx context.Context, cfg Config, rt http.RoundTripper) (restic.Backend, error) {
-	be, err := open(ctx, cfg, rt)
+	be, err := open(cfg, rt)
 	if err != nil {
 		return nil, errors.Wrap(err, "open")
 	}
 
-	err = ensureBucketExists(ctx, be.client, getNamespace(ctx, be.client), cfg.Bucket, cfg.CompartmentOCID)
+	ociNamespace, err := getOCINamespace(ctx, be.client)
+	if err != nil {
+		return nil, err
+	}
+
+	err = ensureBucketExists(ctx, be.client, ociNamespace, cfg.BucketName, cfg.CompartmentOCID)
 	if err != nil {
 		return nil, err
 	}
@@ -134,84 +154,13 @@ func (be *Backend) Join(p ...string) string {
 	return path.Join(p...)
 }
 
-type fileInfo struct {
-	name    string
-	size    int64
-	mode    os.FileMode
-	modTime time.Time
-	isDir   bool
-}
-
-func (fi *fileInfo) Name() string       { return fi.name }    // base name of the file
-func (fi *fileInfo) Size() int64        { return fi.size }    // length in bytes for regular files; system-dependent for others
-func (fi *fileInfo) Mode() os.FileMode  { return fi.mode }    // file mode bits
-func (fi *fileInfo) ModTime() time.Time { return fi.modTime } // modification time
-func (fi *fileInfo) IsDir() bool        { return fi.isDir }   // abbreviation for Mode().IsDir()
-func (fi *fileInfo) Sys() interface{}   { return nil }        // underlying data source (can return nil)
-
-// ReadDir returns the entries for a directory.
-func (be *Backend) ReadDir(ctx context.Context, dir string) (list []os.FileInfo, err error) {
-	debug.Log("ReadDir(%v)", dir)
-
-	// make sure dir ends with a slash
-	if dir[len(dir)-1] != '/' {
-		dir += "/"
-	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	listresp, err := be.client.ListObjects(ctx, objectstorage.ListObjectsRequest{
-		NamespaceName: common.String(getNamespace(ctx, be.client)),
-		BucketName:    common.String(be.cfg.Bucket),
-		Prefix:        common.String(dir),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, obj := range listresp.Objects {
-		name := strings.TrimPrefix(SafeDeref[string](obj.Name), dir)
-		if name == "" {
-			continue
-		}
-
-		getResponse, err := be.client.GetObject(ctx, objectstorage.GetObjectRequest{
-			NamespaceName: common.String(getNamespace(ctx, be.client)),
-			BucketName:    common.String(be.cfg.Bucket),
-			ObjectName:    common.String(name),
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		entry := &fileInfo{
-			name:    name,
-			size:    SafeDeref[int64](getResponse.ContentLength),
-			modTime: getResponse.LastModified.Time,
-		}
-
-		if name[len(name)-1] == '/' {
-			entry.isDir = true
-			entry.mode = os.ModeDir | 0755
-			entry.name = name[:len(name)-1]
-		} else {
-			entry.mode = 0644
-		}
-
-		list = append(list, entry)
-	}
-
-	return list, nil
-}
-
 func (be *Backend) Connections() uint {
 	return be.cfg.Connections
 }
 
 // Location returns this backend's location (the bucket name).
 func (be *Backend) Location() string {
-	return be.Join(be.cfg.Bucket, be.cfg.Prefix)
+	return be.Join(be.cfg.BucketName, be.cfg.Prefix)
 }
 
 // Hasher may return a hash function for calculating a content hash for the backend
@@ -232,24 +181,43 @@ func (be *Backend) Path() string {
 // Save stores data in the backend at the handle.
 func (be *Backend) Save(ctx context.Context, h restic.Handle, rd restic.RewindReader) error {
 	objName := be.Filename(h)
+	ociNamespace, err := getOCINamespace(ctx, be.client)
+	if err != nil {
+		return err
+	}
 
-	_, err := putObject(ctx, be.client, getNamespace(ctx, be.client), be.cfg.Bucket, objName, rd.Length(), io.NopCloser(rd), nil)
+	uploadManager := transfer.NewUploadManager()
+	req := transfer.UploadStreamRequest{
+		UploadRequest: transfer.UploadRequest{
+			NamespaceName:                       common.String(ociNamespace),
+			BucketName:                          common.String(be.cfg.BucketName),
+			ObjectName:                          common.String(objName),
+			EnableMultipartChecksumVerification: common.Bool(true),
+			AllowMultipartUploads:               common.Bool(true),
+			AllowParrallelUploads:               common.Bool(true),
+			ObjectStorageClient:                 &be.client,
+			ContentType:                         common.String(ContentType),
+		},
+		StreamReader: io.NopCloser(rd),
+	}
+	_, err = uploadManager.UploadStream(ctx, req)
+
 	// sanity check
 	if err == nil {
-		getResponse, err := be.client.GetObject(ctx, objectstorage.GetObjectRequest{
-			NamespaceName: common.String(getNamespace(ctx, be.client)),
-			BucketName:    common.String(be.cfg.Bucket),
+		getObjectDetails, err := be.client.HeadObject(ctx, objectstorage.HeadObjectRequest{
+			NamespaceName: common.String(ociNamespace),
+			BucketName:    common.String(be.cfg.BucketName),
 			ObjectName:    common.String(objName),
 		})
 		if err != nil {
 			return errors.Wrap(err, "client.fetch getResponse")
 		}
-		size := SafeDeref[int64](getResponse.ContentLength)
+		size := SafeDeref[int64](getObjectDetails.ContentLength)
 		if size != rd.Length() {
 			return errors.Errorf("wrote %d bytes instead of the expected %d bytes", size, rd.Length())
 		}
 	}
-	return errors.Wrap(err, "client.PutObject")
+	return errors.Wrap(err, "client.UploadStreamRequest")
 }
 
 // Load runs fn with a reader that yields the contents of the file at h at the
@@ -277,16 +245,21 @@ func (be *Backend) openReader(ctx context.Context, h restic.Handle, length int, 
 
 	var request objectstorage.GetObjectRequest
 
+	ociNamespace, err := getOCINamespace(ctx, be.client)
+	if err != nil {
+		return nil, err
+	}
+
 	if bytesRange == "" {
 		request = objectstorage.GetObjectRequest{
-			NamespaceName: common.String(getNamespace(ctx, be.client)),
-			BucketName:    common.String(be.cfg.Bucket),
+			NamespaceName: common.String(ociNamespace),
+			BucketName:    common.String(be.cfg.BucketName),
 			ObjectName:    common.String(objName),
 		}
 	} else {
 		request = objectstorage.GetObjectRequest{
-			NamespaceName: common.String(getNamespace(ctx, be.client)),
-			BucketName:    common.String(be.cfg.Bucket),
+			NamespaceName: common.String(ociNamespace),
+			BucketName:    common.String(be.cfg.BucketName),
 			ObjectName:    common.String(objName),
 			// This is the parameter where you control the download size/request
 			//Range: common.String("bytes=" + bytesRangeStr),
@@ -311,23 +284,37 @@ func (be *Backend) openReader(ctx context.Context, h restic.Handle, length int, 
 // Stat returns information about a blob.
 func (be *Backend) Stat(ctx context.Context, h restic.Handle) (bi restic.FileInfo, err error) {
 	objName := be.Filename(h)
+	ociNamespace, err := getOCINamespace(ctx, be.client)
+	if err != nil {
+		return restic.FileInfo{}, err
+	}
 
-	getResponse, err := be.client.GetObject(ctx, objectstorage.GetObjectRequest{
-		NamespaceName: common.String(getNamespace(ctx, be.client)),
-		BucketName:    common.String(be.cfg.Bucket),
+	getObjectDetails, err := be.client.HeadObject(ctx, objectstorage.HeadObjectRequest{
+		NamespaceName: common.String(ociNamespace),
+		BucketName:    common.String(be.cfg.BucketName),
 		ObjectName:    common.String(objName),
 	})
 	if err != nil {
 		return restic.FileInfo{}, errors.Wrap(err, "Stat")
 	}
-	return restic.FileInfo{Size: SafeDeref[int64](getResponse.ContentLength), Name: objName}, nil
+	if getObjectDetails.RawResponse.StatusCode == 404 {
+		return restic.FileInfo{}, errors.Wrap(err, "File not found")
+	}
+
+	objNameSlice := strings.Split(objName, "/")
+	return restic.FileInfo{Size: SafeDeref[int64](getObjectDetails.ContentLength), Name: objNameSlice[len(objNameSlice)-1]}, nil
 }
 
 // Remove removes the blob with the given name and type.
 func (be *Backend) Remove(ctx context.Context, h restic.Handle) error {
 	objName := be.Filename(h)
 
-	err := deleteObject(ctx, be.client, getNamespace(ctx, be.client), be.cfg.Bucket, objName)
+	ociNamespace, err := getOCINamespace(ctx, be.client)
+	if err != nil {
+		return err
+	}
+
+	err = deleteObject(ctx, be.client, ociNamespace, be.cfg.BucketName, objName)
 
 	if be.IsNotExist(err) {
 		err = nil
@@ -348,9 +335,14 @@ func (be *Backend) List(ctx context.Context, t restic.FileType, fn func(restic.F
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	ociNamespace, err := getOCINamespace(ctx, be.client)
+	if err != nil {
+		return err
+	}
+
 	listresp, err := be.client.ListObjects(ctx, objectstorage.ListObjectsRequest{
-		NamespaceName: common.String(getNamespace(ctx, be.client)),
-		BucketName:    common.String(be.cfg.Bucket),
+		NamespaceName: common.String(ociNamespace),
+		BucketName:    common.String(be.cfg.BucketName),
 		Prefix:        common.String(prefix),
 	})
 	if err != nil {
@@ -363,9 +355,9 @@ func (be *Backend) List(ctx context.Context, t restic.FileType, fn func(restic.F
 			continue
 		}
 
-		getResponse, err := be.client.GetObject(ctx, objectstorage.GetObjectRequest{
-			NamespaceName: common.String(getNamespace(ctx, be.client)),
-			BucketName:    common.String(be.cfg.Bucket),
+		getObjectDetails, err := be.client.HeadObject(ctx, objectstorage.HeadObjectRequest{
+			NamespaceName: common.String(ociNamespace),
+			BucketName:    common.String(be.cfg.BucketName),
 			ObjectName:    common.String(SafeDeref[string](obj.Name)),
 		})
 		if err != nil {
@@ -374,7 +366,7 @@ func (be *Backend) List(ctx context.Context, t restic.FileType, fn func(restic.F
 
 		fi := restic.FileInfo{
 			Name: path.Base(name),
-			Size: SafeDeref[int64](getResponse.ContentLength),
+			Size: SafeDeref[int64](getObjectDetails.ContentLength),
 		}
 
 		if ctx.Err() != nil {
@@ -415,15 +407,20 @@ func (be *Backend) Rename(ctx context.Context, h restic.Handle, l layout.Layout)
 
 	debug.Log("  %v -> %v", oldname, newname)
 
-	_, err := be.client.CopyObject(ctx, objectstorage.CopyObjectRequest{
-		NamespaceName: common.String(getNamespace(ctx, be.client)),
-		BucketName:    common.String(be.cfg.Bucket),
+	ociNamespace, err := getOCINamespace(ctx, be.client)
+	if err != nil {
+		return err
+	}
+
+	_, err = be.client.CopyObject(ctx, objectstorage.CopyObjectRequest{
+		NamespaceName: common.String(ociNamespace),
+		BucketName:    common.String(be.cfg.BucketName),
 		CopyObjectDetails: objectstorage.CopyObjectDetails{
 			SourceObjectName:      common.String(oldname),
 			DestinationObjectName: common.String(newname),
-			DestinationBucket:     common.String(be.cfg.Bucket),
+			DestinationBucket:     common.String(be.cfg.BucketName),
 			DestinationRegion:     common.String(be.cfg.Region),
-			DestinationNamespace:  common.String(getNamespace(ctx, be.client)),
+			DestinationNamespace:  common.String(ociNamespace),
 		},
 	})
 	if err != nil && be.IsNotExist(err) {
@@ -435,7 +432,7 @@ func (be *Backend) Rename(ctx context.Context, h restic.Handle, l layout.Layout)
 		debug.Log("copy failed: %v", err)
 		return err
 	}
-	return deleteObject(ctx, be.client, getNamespace(ctx, be.client), be.cfg.Bucket, oldname)
+	return deleteObject(ctx, be.client, ociNamespace, be.cfg.BucketName, oldname)
 }
 
 // ensureBucketExists checks for existence of bucket inside the compartment.
@@ -471,27 +468,14 @@ func createBucket(ctx context.Context, client objectstorage.ObjectStorageClient,
 	return nil
 }
 
-// getNamespace fetches the tenancy namespace to be used by the OCI object store client
-func getNamespace(ctx context.Context, client objectstorage.ObjectStorageClient) string {
+// getOCINamespace fetches the tenancy namespace to be used by the OCI object store client
+func getOCINamespace(ctx context.Context, client objectstorage.ObjectStorageClient) (string, error) {
 	request := objectstorage.GetNamespaceRequest{}
 	r, err := client.GetNamespace(ctx, request)
 	if err != nil {
-		log.Fatalln(err.Error())
+		return "", errors.Wrap(err, "unable to fetch namespace")
 	}
-	return *r.Value
-}
-
-// putObject uploads an objet to OCI object store
-func putObject(ctx context.Context, c objectstorage.ObjectStorageClient, namespace, bucketname, objectname string, contentLen int64, content io.ReadCloser, metadata map[string]string) (objectstorage.PutObjectResponse, error) {
-	request := objectstorage.PutObjectRequest{
-		NamespaceName: common.String(namespace),
-		BucketName:    common.String(bucketname),
-		ObjectName:    common.String(objectname),
-		ContentLength: common.Int64(contentLen),
-		PutObjectBody: content,
-		OpcMeta:       metadata,
-	}
-	return c.PutObject(ctx, request)
+	return SafeDeref[string](r.Value), nil
 }
 
 // deleteObject deletes an objet from OCI object store

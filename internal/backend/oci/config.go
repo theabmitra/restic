@@ -1,13 +1,11 @@
 package oci
 
 import (
-	"fmt"
 	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/options"
 	"github.com/restic/restic/internal/restic"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
@@ -30,6 +28,7 @@ const (
 )
 
 const (
+	ContentType             = "application/octet-stream"
 	OCI_AUTH_TYPE_KEY       = "OCI_AUTH_TYPE"
 	OCI_REGION_ENV_VAR      = "OCI_REGION"
 	OCI_USER_ENV_VAR        = "OCI_USER"
@@ -53,11 +52,10 @@ type Config struct {
 	Fingerprint     string
 	Passphrase      string
 	OCIAuthType     OraclePrincipalType
-	Bucket          string
+	BucketName      string
 	Prefix          string
 	CompartmentOCID string
-	Connections     uint   `option:"connections" help:"set a limit for the number of concurrent connections (default: 5)"`
-	Layout          string `option:"layout" help:"use this backend layout (default: auto-detect)"`
+	Connections     uint `option:"connections" help:"set a limit for the number of concurrent connections (default: 5)"`
 }
 
 // NewConfig returns a new Config with the default values filled in.
@@ -87,7 +85,7 @@ func ParseConfig(s string) (*Config, error) {
 	bucketName, prefix, _ := strings.Cut(s, "/")
 	prefix = strings.TrimPrefix(path.Clean(prefix), "/")
 	cfg := NewConfig()
-	cfg.Bucket = bucketName
+	cfg.BucketName = bucketName
 	cfg.Prefix = prefix
 	return &cfg, nil
 
@@ -102,32 +100,18 @@ func (cfg *Config) ApplyEnvironment(prefix string) {
 	switch resourcePrincipal {
 	case InstancePrincipalKey:
 		cfg.OCIAuthType = InstancePrincipal
-	case WorkloadKey:
-		cfg.OCIAuthType = WorkloadPrincipal
-	default:
-		cfg.OCIAuthType = UserPrincipal
-	}
-
-	switch cfg.OCIAuthType {
-	case InstancePrincipal:
 		if cfg.CompartmentOCID == "" {
 			cfg.CompartmentOCID = os.Getenv(prefix + OCI_COMPARTMENT_ENV_VAR)
 		}
 
-	case WorkloadPrincipal:
+	case WorkloadKey:
+		cfg.OCIAuthType = WorkloadPrincipal
 		if cfg.Region == "" {
 			cfg.Region = os.Getenv(prefix + OCI_REGION_ENV_VAR)
 		}
-		if err := os.Setenv(auth.ResourcePrincipalVersionEnvVar, auth.ResourcePrincipalVersion2_2); err != nil {
-			fmt.Printf("unable to set OCI SDK environment variable: %s\n", auth.ResourcePrincipalVersionEnvVar)
-			os.Exit(1)
-		}
-		if err := os.Setenv(auth.ResourcePrincipalRegionEnvVar, cfg.Region); err != nil {
-			fmt.Printf("unable to set OCI SDK environment variable: %s\n", auth.ResourcePrincipalRegionEnvVar)
-			os.Exit(1)
-		}
 
-	case UserPrincipal:
+	default:
+		cfg.OCIAuthType = UserPrincipal
 		if cfg.Region == "" {
 			cfg.Region = os.Getenv(prefix + OCI_REGION_ENV_VAR)
 		}
@@ -148,19 +132,6 @@ func (cfg *Config) ApplyEnvironment(prefix string) {
 		if cfg.CompartmentOCID == "" {
 			cfg.CompartmentOCID = os.Getenv(prefix + OCI_COMPARTMENT_ENV_VAR)
 		}
-
-		_, err := os.Stat(filepath.Clean(cfg.PrivateKeyFile))
-		if err != nil {
-			fmt.Println("Unable to read private key file for provider OCI: OCI_KEY_FILE")
-			os.Exit(1)
-		}
-
-		keyData, err := os.ReadFile(filepath.Clean(cfg.PrivateKeyFile))
-		if err != nil {
-			fmt.Println("Unable to read private key data for provider OCI: OCI_KEY_FILE")
-			os.Exit(1)
-		}
-		cfg.PrivateKey = options.NewSecretString(string(keyData))
 
 		if cfg.Passphrase == "" {
 			cfg.Passphrase = os.Getenv(prefix + OCI_PASSPHRASE_ENV_VAR)

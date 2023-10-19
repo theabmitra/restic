@@ -7,22 +7,22 @@ import (
 
 var configTests = []test.ConfigTestData[Config]{
 	{S: "oci:ocitest", Cfg: Config{
-		Bucket:      "ocitest",
+		BucketName:  "ocitest",
 		Prefix:      ".",
 		Connections: 5,
 	}},
 	{S: "oci:ocitest/", Cfg: Config{
-		Bucket:      "ocitest",
+		BucketName:  "ocitest",
 		Prefix:      ".",
 		Connections: 5,
 	}},
 	{S: "oci:ocitest/prefix/directory", Cfg: Config{
-		Bucket:      "ocitest",
+		BucketName:  "ocitest",
 		Prefix:      "prefix/directory",
 		Connections: 5,
 	}},
 	{S: "oci:ocitest/prefix/directory/", Cfg: Config{
-		Bucket:      "ocitest",
+		BucketName:  "ocitest",
 		Prefix:      "prefix/directory",
 		Connections: 5,
 	}},
