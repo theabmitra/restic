@@ -327,9 +327,9 @@ Restic can backup data to any Oracle Cloud Infrastructure Object Storage bucket.
 supports the following authentication mechanism to interact with object store
 - user principal
 - instance principal
+- workload identity
 
-The following environment variables are required to be set for user principal authentication
-
+The following environment variables are required to be set for user principal authentication.
 .. code-block:: console
 
     $ export OCI_REGION=<OCI REGION WHERE BUCKET RESIDES>
@@ -338,8 +338,9 @@ The following environment variables are required to be set for user principal au
     $ export OCI_KEY_FILE=<MY_OCI_PRIVATE_KEY_FILE_PATH>
     $ export OCI_TENANCY=<MY_OCI_TENANCY_OCID>
     $ export OCI_COMPARTMENT_OCID=<MY_OCI_COMPARTMENT_OCID>
+    $ export OCI_AUTH_TYPE=user_principal ## This is optional in the case of user_principal authentication mechanism.
 
-The following environment variables are required to be set for instance principal authentication
+The following environment variables are required to be set for instance principal authentication.
 Using instance principal authentication, you can authorize an instance to make API calls on Oracle Cloud Infrastructure services.
 After you set up the required resources and policies, an application running on an instance can call Oracle Cloud Infrastructure
 public services, removing the need to configure user credentials or a configuration file.
@@ -347,7 +348,19 @@ public services, removing the need to configure user credentials or a configurat
 
 .. code-block:: console
 
-    $ export OCI_AUTH_INSTANCE_PRINCIPAL=True
+    $ export OCI_AUTH_TYPE=instance_principal
+    $ export OCI_COMPARTMENT_OCID=<MY_OCI_COMPARTMENT_OCID>
+
+
+The following environment variables are required to be set when using OCI workload identity.
+Using OCI workload identity, you can authorize a pod on Kubernetes running `restic` the priviledges to access OCI object store
+resources to backup and restore data.
+For more info refer documentation `here <https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contenggrantingworkloadaccesstoresources.htm>`
+
+.. code-block:: console
+
+    $ export OCI_AUTH_TYPE=workload
+    $ export OCI_REGION=<OCI REGION WHERE BUCKET RESIDES>
 
 You can then easily initialize a repository that uses your OCI Object store as
 a backend. If the bucket does not exist it will be created in the
