@@ -1,7 +1,6 @@
 package oci
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"github.com/oracle/oci-go-sdk/v65/common"
@@ -17,7 +16,6 @@ import (
 	"github.com/restic/restic/internal/restic"
 	"hash"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"path"
@@ -271,14 +269,8 @@ func (be *Backend) openReader(ctx context.Context, h restic.Handle, length int, 
 	if err != nil {
 		return nil, err
 	}
-
-	// In this example, we're storing the download content in memory, please be aware of any issue with oom
-	content, err := ioutil.ReadAll(resp.Content)
-	if err != nil {
-		return nil, err
-	}
-
-	return io.NopCloser(bytes.NewReader(content)), nil
+	
+	return io.NopCloser(resp.Content), nil
 }
 
 // Stat returns information about a blob.
