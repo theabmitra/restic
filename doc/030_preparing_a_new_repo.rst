@@ -335,6 +335,7 @@ Oracle Cloud Infrastructure Object Storage
 
 Restic can backup data to any Oracle Cloud Infrastructure Object Storage bucket. Oracle Cloud Infrastructure
 supports the following authentication mechanism to interact with object store
+
 - user principal
 - instance principal
 - workload identity
